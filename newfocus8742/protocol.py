@@ -1,3 +1,4 @@
+from ast import Return
 import logging
 import asyncio
 
@@ -5,8 +6,8 @@ logger = logging.getLogger(__name__)
 
 
 def _make_do(cmd, doc=None):
-    def f(self, xx=None, *nn):
-        self.do(cmd, xx, *nn)
+    def f(self, ctr=1, xx=None, *nn):
+        self.do(cmd, ctr, xx, *nn)
     if doc is not None:
         f.__doc__ = doc
     return f
@@ -14,9 +15,12 @@ def _make_do(cmd, doc=None):
 
 def _make_ask(cmd, doc=None, conv=int):
     assert cmd.endswith("?")
-    async def f(self, xx=None, *nn):
-        ret = await self.ask(cmd, xx, *nn)
-        ret = conv(ret)
+    async def f(self, ctr=1, xx=None, *nn):
+        ret = await self.ask(cmd, ctr, xx, *nn)
+        try:
+                ret = conv(ret)
+        except:
+                pass
         return ret
     if doc is not None:
         f.__doc__ = doc
@@ -31,7 +35,7 @@ class NewFocus8742Protocol:
     """
     poll_interval = .01
 
-    def fmt_cmd(self, cmd, xx=None, *nn):
+    def fmt_cmd(self, cmd, ctr=1, xx=None, *nn):
         """Format a command.
 
         Args:
@@ -39,25 +43,36 @@ class NewFocus8742Protocol:
             xx (int, optional for some commands): Motor channel
             nn (multiple int, optional): additional parameters
         """
-        if xx is not None:
-            cmd = "{:d}".format(xx) + cmd
+
+        if cmd=='SC?':
+                return cmd
+        elif cmd!='SC':
+                if xx is not None:
+                        cmd = "{:d}".format(xx) + cmd
+                cmd = f'{ctr}>'+cmd
+        
         if nn:
             cmd += ", ".join("{:d}".format(n) for n in nn)
+        if 'PR' in cmd:
+                print(f'cmd:{cmd}')
         return cmd
+        
 
-    def do(self, cmd, xx=None, *nn):
+
+    def do(self, cmd, ctr=1, xx=None, *nn):
         """Format and send a command to the device
 
         See Also:
             :meth:`fmt_cmd`: for the formatting and additional
                 parameters.
         """
-        cmd = self.fmt_cmd(cmd, xx, *nn)
+        cmd = self.fmt_cmd(cmd, ctr, xx, *nn)
         assert len(cmd) < 64
         logger.debug("do %s", cmd)
+
         self._writeline(cmd)
 
-    async def ask(self, cmd, xx=None, *nn):
+    async def ask(self, cmd, ctr=1, xx=None, *nn):
         """Execute a command and return a response.
 
         The command needs to include the final question mark.
@@ -67,10 +82,11 @@ class NewFocus8742Protocol:
                 parameters.
         """
         assert cmd.endswith("?")
-        self.do(cmd, xx, *nn)
+        self.do(cmd, ctr, xx, *nn)
         ret = await self._readline()
+        ret = ret.split('>')
         logger.debug("ret %s", ret)
-        return ret
+        return ret[-1]
 
     def _writeline(self, cmd):
         raise NotImplemented
@@ -196,9 +212,9 @@ class NewFocus8742Protocol:
 
     get_position = _make_ask("PA?",
             """Get target position.
-
+    
             This command is used to query the target position of an axis.""")
-
+    
     set_relative = _make_do("PR",
             """Relative move.
 
@@ -302,8 +318,31 @@ class NewFocus8742Protocol:
             error buffer is cleared by one(1) element. This means that an error
             can be read only once, with either command.""")
 
-    async def finish(self, xx=None):
-        while not await self.done(xx):
+    ini_scan = _make_do("SC",
+            """This command is used to initiate scan of controllers on RS-485 network. When a master
+            controller receives this command, it scans the RS-485 network for all the slave controllers
+            connected to it""")
+
+    get_scan = _make_ask("SC?",
+            """"This command is used to query the list of all controllers on an RS-485 network""")
+
+    get_gateway = _make_ask("GATEWAY?",
+            """Default gateway address query.""")
+
+    get_mac = _make_ask("MACADDR?",
+            """MAC address  query.""")
+
+    get_ip = _make_ask("IPADDR?",
+            """IP address""")
+
+    get_hostname = _make_ask("HOSTNAME?",
+            """HOSTNAME QUERY""")
+
+    get_ipmode = _make_ask("IPMODE?",
+            """IP mode query""")
+
+    async def finish(self, ctr=1, xx=None):
+        while not await self.done(ctr,xx):
             await asyncio.sleep(self.poll_interval)
 
     async def ping(self):
